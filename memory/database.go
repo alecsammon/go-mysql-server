@@ -107,11 +107,11 @@ func (d *BaseDatabase) Name() string {
 
 // Tables returns all tables in the database.
 func (d *BaseDatabase) Tables() map[string]sql.Table {
-	d.tablesMu.Lock()
-	defer d.tablesMu.Unlock()
+	d.tablesMu.RLock()
+	defer d.tablesMu.RUnlock()
 	tables := make(map[string]sql.Table, len(d.tables))
 	for name, table := range d.tables {
-		d.tables[name] = table
+		tables[name] = table
 	}
 	return tables
 }
