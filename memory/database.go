@@ -107,9 +107,11 @@ func (d *BaseDatabase) Name() string {
 
 // Tables returns all tables in the database.
 func (d *BaseDatabase) Tables() map[string]sql.Table {
+	d.tablesMu.Lock()
+	defer d.tablesMu.Unlock()
 	tables := make(map[string]sql.Table, len(d.tables))
 	for name, table := range d.tables {
-		d.AddTable(name, table)
+		d.tables[name] = table
 	}
 	return tables
 }
@@ -140,8 +142,8 @@ func (d *BaseDatabase) putTable(t *Table) {
 	d.tablesMu.RLock()
 	for name, table := range d.tables {
 		if strings.ToLower(name) == lowerName {
-			d.tablesMu.RUnlock()
 			t.name = table.Name()
+			d.tablesMu.RUnlock()
 			d.AddTable(name, t)
 			return
 		}
