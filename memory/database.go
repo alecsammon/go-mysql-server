@@ -108,8 +108,6 @@ func (d *BaseDatabase) Name() string {
 // Tables returns all tables in the database.
 func (d *BaseDatabase) Tables() map[string]sql.Table {
 	tables := make(map[string]sql.Table, len(d.tables))
-	d.tablesMu.RLock()
-	defer d.tablesMu.RUnlock()
 	for name, table := range d.tables {
 		tables[name] = table
 	}
@@ -138,26 +136,19 @@ func (d *BaseDatabase) GetTableInsensitive(ctx *sql.Context, tblName string) (sq
 
 // putTable writes the table given into database storage. A table with this name must already be present.
 func (d *BaseDatabase) putTable(t *Table) {
-	d.tablesMu.RLock()
-
 	lowerName := strings.ToLower(t.name)
 	for name, table := range d.tables {
 		if strings.ToLower(name) == lowerName {
-			d.tablesMu.RUnlock()
 			t.name = table.Name()
 			d.AddTable(name, t)
 			return
 		}
 	}
 
-	d.tablesMu.RUnlock()
 	panic(fmt.Sprintf("table %s not found", t.name))
 }
 
 func (d *BaseDatabase) GetTableNames(ctx *sql.Context) ([]string, error) {
-	d.tablesMu.RLock()
-	defer d.tablesMu.RUnlock()
-
 	tblNames := make([]string, 0, len(d.tables))
 	for k := range d.tables {
 		tblNames = append(tblNames, k)
@@ -167,9 +158,6 @@ func (d *BaseDatabase) GetTableNames(ctx *sql.Context) ([]string, error) {
 }
 
 func (d *BaseDatabase) CreateFulltextTableNames(ctx *sql.Context, parentTableName string, parentIndexName string) (fulltext.IndexTableNames, error) {
-	d.tablesMu.RLock()
-	defer d.tablesMu.RUnlock()
-
 	var tablePrefix string
 OuterLoop:
 	for i := uint64(0); true; i++ {
@@ -261,9 +249,7 @@ func (d *BaseDatabase) DeleteTable(name string) {
 
 // CreateTable creates a table with the given name and schema
 func (d *BaseDatabase) CreateTable(ctx *sql.Context, name string, schema sql.PrimaryKeySchema, collation sql.CollationID, comment string) error {
-	d.tablesMu.RLock()
 	_, ok := d.tables[name]
-	d.tablesMu.RUnlock()
 
 	if ok {
 		return sql.ErrTableAlreadyExists.New(name)
@@ -285,9 +271,7 @@ func (d *BaseDatabase) CreateTable(ctx *sql.Context, name string, schema sql.Pri
 
 // CreateIndexedTable creates a table with the given name and schema
 func (d *BaseDatabase) CreateIndexedTable(ctx *sql.Context, name string, sch sql.PrimaryKeySchema, idxDef sql.IndexDef, collation sql.CollationID) error {
-	d.tablesMu.RLock()
 	_, ok := d.tables[name]
-	d.tablesMu.RUnlock()
 	if ok {
 		return sql.ErrTableAlreadyExists.New(name)
 	}
@@ -315,9 +299,6 @@ func (d *BaseDatabase) CreateIndexedTable(ctx *sql.Context, name string, sch sql
 
 // DropTable drops the table with the given name
 func (d *BaseDatabase) DropTable(ctx *sql.Context, name string) error {
-	d.tablesMu.RLock()
-	defer d.tablesMu.RUnlock()
-
 	t, ok := d.tables[name]
 	if !ok {
 		return sql.ErrTableNotFound.New(name)
@@ -330,17 +311,13 @@ func (d *BaseDatabase) DropTable(ctx *sql.Context, name string) error {
 }
 
 func (d *BaseDatabase) RenameTable(ctx *sql.Context, oldName, newName string) error {
-	d.tablesMu.RLock()
 	tbl, ok := d.tables[oldName]
-	d.tablesMu.RUnlock()
 	if !ok {
 		// Should be impossible (engine already checks this condition)
 		return sql.ErrTableNotFound.New(oldName)
 	}
 
-	d.tablesMu.RLock()
 	_, ok = d.tables[newName]
-	d.tablesMu.RUnlock()
 	if ok {
 		return sql.ErrTableAlreadyExists.New(newName)
 	}
