@@ -23,7 +23,6 @@ import (
 	"github.com/dolthub/go-mysql-server/sql/expression"
 	"github.com/dolthub/go-mysql-server/sql/fulltext"
 	"github.com/dolthub/go-mysql-server/sql/types"
-	"sync"
 )
 
 // Database is an in-memory database.
@@ -35,7 +34,6 @@ type Database struct {
 type MemoryDatabase interface {
 	sql.Database
 	AddTable(name string, t MemTable)
-	DeleteTable(name string)
 	Database() *BaseDatabase
 }
 
@@ -62,7 +60,6 @@ type BaseDatabase struct {
 	events            []sql.EventDefinition
 	primaryKeyIndexes bool
 	collation         sql.CollationID
-	tablesMu          *sync.RWMutex
 }
 
 var _ MemoryDatabase = (*Database)(nil)
@@ -79,10 +76,9 @@ func NewDatabase(name string) *Database {
 // NewViewlessDatabase creates a new database that doesn't persist views. Used only for testing. Use NewDatabase.
 func NewViewlessDatabase(name string) *BaseDatabase {
 	return &BaseDatabase{
-		name:     name,
-		tables:   map[string]MemTable{},
-		fkColl:   newForeignKeyCollection(),
-		tablesMu: &sync.RWMutex{},
+		name:   name,
+		tables: map[string]MemTable{},
+		fkColl: newForeignKeyCollection(),
 	}
 }
 
@@ -140,11 +136,10 @@ func (d *BaseDatabase) putTable(t *Table) {
 	for name, table := range d.tables {
 		if strings.ToLower(name) == lowerName {
 			t.name = table.Name()
-			d.AddTable(name, t)
+			d.tables[name] = t
 			return
 		}
 	}
-
 	panic(fmt.Sprintf("table %s not found", t.name))
 }
 
@@ -230,7 +225,7 @@ func (db *HistoryDatabase) AddTableAsOf(name string, t sql.Table, asOf interface
 	}
 
 	db.Revisions[strings.ToLower(name)][asOf] = t
-	db.AddTable(name, t.(MemTable))
+	db.tables[name] = t.(MemTable)
 }
 
 // AddTable adds a new table to the database.
@@ -238,15 +233,9 @@ func (d *BaseDatabase) AddTable(name string, t MemTable) {
 	d.tables[name] = t
 }
 
-// DeleteTable deletes a table from the database.
-func (d *BaseDatabase) DeleteTable(name string) {
-	delete(d.tables, name)
-}
-
 // CreateTable creates a table with the given name and schema
 func (d *BaseDatabase) CreateTable(ctx *sql.Context, name string, schema sql.PrimaryKeySchema, collation sql.CollationID, comment string) error {
 	_, ok := d.tables[name]
-
 	if ok {
 		return sql.ErrTableAlreadyExists.New(name)
 	}
@@ -258,7 +247,7 @@ func (d *BaseDatabase) CreateTable(ctx *sql.Context, name string, schema sql.Pri
 		table.EnablePrimaryKeyIndexes()
 	}
 
-	d.AddTable(name, table)
+	d.tables[name] = table
 	sess := SessionFromContext(ctx)
 	sess.putTable(table.data)
 
@@ -289,7 +278,7 @@ func (d *BaseDatabase) CreateIndexedTable(ctx *sql.Context, name string, sch sql
 		}
 	}
 
-	d.AddTable(name, table)
+	d.tables[name] = table
 	return nil
 }
 
@@ -302,7 +291,7 @@ func (d *BaseDatabase) DropTable(ctx *sql.Context, name string) error {
 
 	SessionFromContext(ctx).dropTable(t.(*Table).data)
 
-	d.DeleteTable(name)
+	delete(d.tables, name)
 	return nil
 }
 
@@ -338,8 +327,8 @@ func (d *BaseDatabase) RenameTable(ctx *sql.Context, oldName, newName string) er
 	}
 	memTbl.data.tableName = newName
 
-	d.AddTable(newName, memTbl)
-	d.DeleteTable(oldName)
+	d.tables[newName] = memTbl
+	delete(d.tables, oldName)
 	sess.putTable(memTbl.data)
 
 	return nil
